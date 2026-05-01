@@ -1,0 +1,22 @@
+{
+  "name": "@brutaldeluxe/pi-synthetic",
+  "version": "0.1.0",
+  "description": "Synthetic.new provider extension for Pi — open-source models via OpenAI-compatible API with quota tracking",
+  "keywords": ["pi-package", "pi-extension", "pi", "synthetic"],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brutaldeluxe82/pi-synthetic"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "extensions",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
