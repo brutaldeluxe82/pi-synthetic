@@ -1,11 +1,11 @@
 # @brutaldeluxe/pi-synthetic
 
-[Synthetic.new](https://synthetic.new) provider extension for [Pi](https://github.com/mariozechner/pi-coding-agent) — access open-source models through an OpenAI-compatible API with quota tracking and model caching.
+[Synthetic.new](https://synthetic.new) provider extension for [Pi](https://github.com/mariozechner/pi-coding-agent) — access open-source models through an OpenAI-compatible API with quota tracking, model caching, and zero-data-retention web search.
 
 ## Install
 
 ```bash
-pi install npm:@brutaldeluxe/pi-synthetic
+pi install git:github.com/brutaldeluxe82/pi-synthetic
 /reload
 ```
 
@@ -21,6 +21,7 @@ export SYNTHETIC_API_KEY=your-key-here
 - **Auto-refreshes** the model catalog on session start (every 6 hours or when cache is stale)
 - **Caches models** locally so the extension works offline with a recent catalog
 - **Tracks quotas** with a nice ANSI progress bar display
+- **Web search** via `synthetic_web_search` tool — zero-data-retention, fresh results
 
 ## Commands
 
@@ -28,6 +29,12 @@ export SYNTHETIC_API_KEY=your-key-here
 |---------|-------------|
 | `/synthetic:quotas` | Show weekly token and rolling 5h usage quotas |
 | `/synthetic:refresh` | Refresh the model catalog from the API |
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `synthetic_web_search` | Search the web via Synthetic's zero-data-retention API |
 
 ## Model features
 

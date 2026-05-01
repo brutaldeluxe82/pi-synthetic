@@ -8,11 +8,12 @@
  *   export SYNTHETIC_API_KEY=your-key-here
  *   pi -e ~/.config/pi/extensions/synthetic-new
  *
- * Then use /model to select synthetic/model-name
- * or /synthetic:refresh to refresh the model catalog manually.
+ * Then use /model to select synthetic/model-name,
+ * /synthetic:refresh to refresh the model catalog, or
+ * /synthetic:quotas to check your usage.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, ProviderModelConfig } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, AgentToolResult, ProviderModelConfig } from "@mariozechner/pi-coding-agent";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -25,10 +26,14 @@ import { fileURLToPath } from "node:url";
 const SYNTHETIC_BASE_URL = "https://api.synthetic.new/openai/v1";
 const SYNTHETIC_MODELS_URL = `${SYNTHETIC_BASE_URL}/models`;
 const SYNTHETIC_QUOTAS_URL = "https://api.synthetic.new/v2/quotas";
+const SYNTHETIC_SEARCH_URL = "https://api.synthetic.new/v2/search";
 const CACHE_FILE = fileURLToPath(new URL("./models-cache.json", import.meta.url));
 const FETCH_TIMEOUT_MS = 12_000;
 const FETCH_RETRIES = 2;
 const AUTO_REFRESH_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+// Search tool name
+const SYNTHETIC_WEB_SEARCH_TOOL = "synthetic_web_search";
 
 // Quota display constants
 const WEEKLY_REGEN_INTERVAL_MS = 3 * 60 * 60 * 1000; // 2% every 3 hours
@@ -89,6 +94,18 @@ interface SyntheticModel {
 
 interface SyntheticModelsResponse {
   data?: unknown;
+}
+
+// Search types
+interface SyntheticSearchResult {
+  url: string;
+  title: string;
+  text: string;
+  published: string;
+}
+
+interface SyntheticSearchResponse {
+  results: SyntheticSearchResult[];
 }
 
 // Quota types
@@ -360,6 +377,102 @@ async function fetchSyntheticQuotas(apiKey: string, signal?: AbortSignal): Promi
 async function getSyntheticApiKey(ctx: ExtensionCommandContext): Promise<string> {
   const storedKey = await ctx.modelRegistry.authStorage.getApiKey("synthetic", { includeFallback: false });
   return storedKey ?? process.env.SYNTHETIC_API_KEY ?? "";
+}
+
+// =============================================================================
+// Web Search Tool
+// =============================================================================
+
+function registerSyntheticWebSearchTool(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: SYNTHETIC_WEB_SEARCH_TOOL,
+    label: "Synthetic: Web Search",
+    description:
+      "Search the web using Synthetic's zero-data-retention API. Returns search results with titles, URLs, content snippets, and publication dates. Use for finding documentation, articles, recent information, or any web content. Results are fresh and not cached by Synthetic.",
+    promptSnippet: "Search the web using Synthetic's zero-data-retention API",
+    promptGuidelines: [
+      "Use synthetic_web_search for finding documentation, articles, recent information, or any web content.",
+      "Write specific queries with names, dates, versions, or locations for synthetic_web_search.",
+      "synthetic_web_search results are fresh and not cached by Synthetic.",
+    ],
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query. Be specific for best results.",
+        },
+      },
+      required: ["query"],
+    },
+
+    async execute(
+      _toolCallId: string,
+      params: { query: string },
+      signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      ctx: ExtensionContext,
+    ): Promise<AgentToolResult> {
+      const apiKey = await resolveApiKey(ctx);
+      if (!apiKey) {
+        throw new Error(
+          "Synthetic web search requires a Synthetic API key. Set SYNTHETIC_API_KEY or run /login synthetic.",
+        );
+      }
+
+      const response = await fetch(SYNTHETIC_SEARCH_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: params.query }),
+        signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Synthetic search API error: ${response.status} ${truncate(errorText)}`);
+      }
+
+      let data: SyntheticSearchResponse;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        throw new Error(
+          parseError instanceof Error
+            ? `Failed to parse search results: ${parseError.message}`
+            : "Failed to parse search results",
+        );
+      }
+
+      let content = `Found ${data.results.length} result(s) for "${params.query}":\n\n`;
+      for (const result of data.results) {
+        content += `## ${result.title}\n`;
+        content += `URL: ${result.url}\n`;
+        if (result.published) {
+          content += `Published: ${result.published}\n`;
+        }
+        content += `\n${result.text}\n`;
+        content += "\n---\n\n";
+      }
+
+      return {
+        content: [{ type: "text", text: content }],
+      };
+    },
+  });
+}
+
+/** Resolve the API key from auth storage or environment */
+async function resolveApiKey(ctx: ExtensionContext): Promise<string | undefined> {
+  try {
+    const storedKey = await ctx.modelRegistry.authStorage.getApiKey("synthetic", { includeFallback: false });
+    if (storedKey) return storedKey;
+  } catch {
+    // authStorage may not be available in all contexts
+  }
+  return process.env.SYNTHETIC_API_KEY;
 }
 
 async function handleQuotasCommand(ctx: ExtensionCommandContext): Promise<void> {
@@ -757,6 +870,7 @@ export default function (pi: ExtensionAPI) {
   let refreshInFlight: Promise<RefreshResult> | null = null;
 
   registerSyntheticProvider(pi, startupModels);
+  registerSyntheticWebSearchTool(pi);
 
   async function refreshAndRegister(apiKey: string): Promise<RefreshResult> {
     if (!refreshInFlight) {
